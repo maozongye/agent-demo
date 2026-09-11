@@ -6,6 +6,7 @@ legacy/incomplete (Message has no thread_id FK in the current model).
 """
 
 from app.models.contract import ContractDocument, ContractReview
+from app.models.data_report import DataReport
 from app.models.email_audit import EmailAuditLog
 from app.models.email_draft import EmailDraft
 from app.models.knowledge_base import KnowledgeBase
@@ -25,4 +26,5 @@ __all__ = [
     "EmailAuditLog",
     "ContractDocument",
     "ContractReview",
+    "DataReport",
 ]
