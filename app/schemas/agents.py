@@ -111,11 +111,29 @@ class ReportQueryRequest(BaseModel):
     """Natural-language report query."""
 
     query: str = Field(..., min_length=1, max_length=2000)
+    execute: bool = Field(default=True, description="If true, run SQL in read-only sandbox")
 
 
 class ReportQueryResponse(BaseModel):
-    """Stub NL→SQL preview + analysis."""
+    """NL→SQL preview + analysis report."""
 
+    id: Optional[int] = None
     tenant_id: int
     sql_preview: str
     analysis_report: str
+    row_count: int = 0
+    status: str = "completed"
+
+
+class DataReportResponse(BaseModel):
+    """Persisted data report with SQL traceability."""
+
+    id: int
+    tenant_id: int
+    created_by: int
+    query_text: str
+    sql_text: str
+    report_text: str
+    row_count: int
+    status: str
+    created_at: Optional[datetime] = None

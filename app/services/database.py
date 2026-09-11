@@ -20,6 +20,7 @@ from app.core.config import (
     settings,
 )
 from app.core.logging import logger
+from app.models.data_report import DataReport
 from app.models.email_audit import EmailAuditLog
 from app.models.email_draft import EmailDraft, EmailStatus
 from app.models.knowledge_base import KnowledgeBase
@@ -432,6 +433,39 @@ class DatabaseService:
                 EmailAuditLog.draft_id == draft_id,
             )
             return list(session.exec(stmt).all())
+
+    async def create_data_report(
+        self,
+        *,
+        tenant_id: int,
+        created_by: int,
+        query_text: str,
+        sql_text: str,
+        rows_json: str,
+        report_text: str,
+        status: str = "completed",
+    ) -> DataReport:
+        with Session(self.engine) as session:
+            row = DataReport(
+                tenant_id=tenant_id,
+                created_by=created_by,
+                query_text=query_text,
+                sql_text=sql_text,
+                rows_json=rows_json,
+                report_text=report_text,
+                status=status,
+            )
+            session.add(row)
+            session.commit()
+            session.refresh(row)
+            return row
+
+    async def get_data_report(self, tenant_id: int, report_id: int) -> Optional[DataReport]:
+        with Session(self.engine) as session:
+            row = session.get(DataReport, report_id)
+            if row is None or row.tenant_id != tenant_id:
+                return None
+            return row
 
 
 # Create a singleton instance
