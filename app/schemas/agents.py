@@ -137,3 +137,9 @@ class DataReportResponse(BaseModel):
     row_count: int
     status: str
     created_at: Optional[datetime] = None
+
+
+class SqlValidateRequest(BaseModel):
+    """Validate SQL without executing."""
+
+    sql: str = Field(..., min_length=1)

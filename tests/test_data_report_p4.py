@@ -166,3 +166,74 @@ def test_cross_tenant_get_report_404(monkeypatch):
     app.dependency_overrides[report_mod.get_current_tenant] = tenant
     client = TestClient(app)
     assert client.get("/agents/report/reports/5").status_code == 404
+
+
+def test_tenant_scope_blocks_or_bypass():
+    with pytest.raises(SQLSafetyError, match="OR"):
+        assert_tenant_scope("SELECT * FROM session WHERE tenant_id = 10 OR 1=1", 10)
+    with pytest.raises(SQLSafetyError, match="OR"):
+        assert_tenant_scope("SELECT * FROM session WHERE 1=1 OR tenant_id = :tenant_id", 10)
+
+
+def test_tenant_scope_blocks_union_bypass():
+    with pytest.raises(SQLSafetyError, match="UNION"):
+        assert_tenant_scope(
+            "SELECT id FROM session WHERE tenant_id = 10 UNION ALL SELECT id FROM session",
+            10,
+        )
+    with pytest.raises(SQLSafetyError, match="UNION"):
+        assert_tenant_scope(
+            "SELECT id FROM session WHERE tenant_id = 10 UNION SELECT id FROM session WHERE tenant_id = 10",
+            10,
+        )
+
+
+def test_tenant_scope_blocks_fake_bind_and_wrong_literal():
+    with pytest.raises(SQLSafetyError):
+        assert_tenant_scope("SELECT * FROM session WHERE tenant_id = :other_id", 10)
+    with pytest.raises(SQLSafetyError, match="Cross-tenant"):
+        assert_tenant_scope("SELECT * FROM session WHERE tenant_id = 99", 10)
+    # comments stripped: write verb only inside a comment is inert
+    assert_readonly_sql("SELECT 1 /* DELETE */ FROM session WHERE tenant_id = 10")
+    # tenant filter only inside a comment does not count
+    with pytest.raises(SQLSafetyError):
+        assert_tenant_scope("SELECT * FROM session WHERE 1=1 /* tenant_id = 10 */", 10)
+    # multi-statements still blocked
+    with pytest.raises(SQLSafetyError):
+        assert_readonly_sql("SELECT 1 FROM session WHERE tenant_id = 10; DELETE FROM session")
+
+
+def test_tenant_scope_allows_literal_and_bind():
+    assert_tenant_scope("SELECT COUNT(*) AS n FROM session WHERE tenant_id = 10", 10)
+    assert_tenant_scope("SELECT COUNT(*) AS n FROM session WHERE tenant_id = :tenant_id", 10)
+
+
+def test_validate_sql_api_blocks_or_union(monkeypatch):
+    import app.api.v1.agents.report as report_mod
+
+    app = FastAPI()
+    app.include_router(report_mod.router, prefix="/agents/report")
+
+    async def user():
+        return _user()
+
+    async def tenant():
+        return _tenant(10)
+
+    app.dependency_overrides[report_mod.get_current_user] = user
+    app.dependency_overrides[report_mod.get_current_tenant] = tenant
+    client = TestClient(app)
+    assert (
+        client.post(
+            "/agents/report/validate-sql",
+            json={"sql": "SELECT * FROM session WHERE tenant_id = 10 OR 1=1"},
+        ).status_code
+        == 400
+    )
+    assert (
+        client.post(
+            "/agents/report/validate-sql",
+            json={"sql": "SELECT id FROM session WHERE tenant_id = 10 UNION ALL SELECT id FROM session"},
+        ).status_code
+        == 400
+    )

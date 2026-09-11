@@ -11,7 +11,12 @@ from app.core.langgraph.data_report import run_report_pipeline
 from app.core.logging import logger
 from app.models.tenant import Tenant
 from app.models.user import User
-from app.schemas.agents import DataReportResponse, ReportQueryRequest, ReportQueryResponse
+from app.schemas.agents import (
+    DataReportResponse,
+    ReportQueryRequest,
+    ReportQueryResponse,
+    SqlValidateRequest,
+)
 from app.services.database import DatabaseService, database_service
 from app.services.sql_sandbox import SQLSafetyError, assert_tenant_scope, execute_readonly
 
@@ -37,26 +42,19 @@ async def nl_query(
 
     rows: list = []
     status = "completed"
+    analysis = pipeline.get("analysis") or ""
     if payload.execute:
         try:
             engine = getattr(db_service, "engine", None) or getattr(database_service, "engine", None)
             rows = execute_readonly(engine, sql, tenant.id)
+            analysis = run_report_pipeline(payload.query, tenant.id, rows=rows).get("analysis") or ""
         except SQLSafetyError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except Exception as exc:  # noqa: BLE001
-            # Persist failed execution with SQL for traceability
             status = "failed"
-            pipeline = run_report_pipeline(payload.query, tenant.id, rows=[])
-            pipeline["analysis"] = f"Execution failed: {exc}\n\nSQL:\n{sql}"
+            analysis = f"Execution failed: {exc}\n\nSQL:\n{sql}"
             logger.warning("report_exec_failed", error=str(exc), tenant_id=tenant.id)
             rows = []
-
-    # rebuild analysis with rows when successful translate
-    if status == "completed":
-        pipeline = run_report_pipeline(payload.query, tenant.id, rows=rows)
-        if pipeline.get("error"):
-            raise HTTPException(status_code=400, detail=pipeline["error"])
-        sql = pipeline["sql"]
 
     report = await db_service.create_data_report(
         tenant_id=tenant.id,
@@ -64,14 +62,14 @@ async def nl_query(
         query_text=payload.query,
         sql_text=sql,
         rows_json=json.dumps(rows, default=str),
-        report_text=pipeline.get("analysis") or "",
+        report_text=analysis,
         status=status,
     )
     return ReportQueryResponse(
         id=report.id,
         tenant_id=tenant.id,
         sql_preview=sql,
-        analysis_report=report.report_text,
+        analysis_report=analysis,
         row_count=len(rows),
         status=status,
     )
@@ -88,9 +86,9 @@ async def get_report(
     if row is None:
         raise HTTPException(status_code=404, detail="Report not found")
     try:
-        rows = json.loads(row.rows_json or "[]")
+        parsed = json.loads(row.rows_json or "[]")
     except json.JSONDecodeError:
-        rows = []
+        parsed = []
     return DataReportResponse(
         id=row.id,
         tenant_id=row.tenant_id,
@@ -98,7 +96,7 @@ async def get_report(
         query_text=row.query_text,
         sql_text=row.sql_text,
         report_text=row.report_text,
-        row_count=len(rows) if isinstance(rows, list) else 0,
+        row_count=len(parsed) if isinstance(parsed, list) else 0,
         status=row.status,
         created_at=row.created_at,
     )
@@ -106,15 +104,14 @@ async def get_report(
 
 @router.post("/validate-sql")
 async def validate_sql(
-    payload: dict,
+    payload: SqlValidateRequest,
     user: User = Depends(get_current_user),
     tenant: Tenant = Depends(get_current_tenant),
 ):
     """Validate SQL for read-only + tenant scope without executing."""
     _ = user
-    sql = str(payload.get("sql") or "")
     try:
-        cleaned = assert_tenant_scope(sql, tenant.id)
+        cleaned = assert_tenant_scope(payload.sql, tenant.id)
     except SQLSafetyError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"ok": True, "sql": cleaned, "tenant_id": tenant.id}
