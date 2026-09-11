@@ -62,17 +62,49 @@ class EmailDraftResponse(BaseModel):
     subject: str
     body: str
     to_address: str
+    category: str = ""
+    category_confidence: float = 0.0
     created_at: datetime
     updated_at: datetime
 
 
+class EmailIngestRequest(BaseModel):
+    """Stub inbound email ingest."""
+
+    from_address: str = Field(..., max_length=320)
+    subject: str = Field(default="", max_length=500)
+    body: str = ""
+    to_address: str = Field(default="", max_length=320)
+
+
+class EmailIngestResponse(BaseModel):
+    """Ingest + classify + draft reply result."""
+
+    draft: "EmailDraftResponse"
+    category: str
+    confidence: float
+    rationale: str
+
+
 class EmailClassifyResponse(BaseModel):
-    """Stub classification result."""
+    """Classification result."""
 
     draft_id: int
     category: str
     confidence: float
     rationale: str
+
+
+class EmailAuditLogResponse(BaseModel):
+    """Audit log entry."""
+
+    id: int
+    tenant_id: int
+    draft_id: int
+    actor_user_id: int
+    action: str
+    detail: str
+    created_at: datetime
 
 
 class ReportQueryRequest(BaseModel):
