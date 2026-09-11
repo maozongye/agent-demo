@@ -69,6 +69,7 @@ def assert_tenant_scope(sql: str, tenant_id: int) -> str:
     - Require ``tenant_id = <active>`` and/or ``tenant_id = :tenant_id``
     - Reject other tenant literals / bind names / unsupported operators
     - Comments are stripped so filters hidden in comments do not count
+    - JOINs require a tenant_id equality filter per FROM/JOIN table
     """
     cleaned = assert_readonly_sql(sql)
     scanned = strip_sql_comments(cleaned)
@@ -103,6 +104,15 @@ def assert_tenant_scope(sql: str, tenant_id: int) -> str:
         raise SQLSafetyError(
             "Unsupported tenant_id predicate; use tenant_id = <active> or :tenant_id"
         )
+
+    # T25: every FROM + JOIN relation needs its own tenant equality filter
+    join_count = len(re.findall(r"\bJOIN\b", scanned, re.I))
+    if join_count:
+        required = join_count + 1  # base FROM table + each JOIN
+        if len(preds) < required:
+            raise SQLSafetyError(
+                "JOIN queries must include a tenant_id equality filter for each joined table"
+            )
 
     return cleaned
 
