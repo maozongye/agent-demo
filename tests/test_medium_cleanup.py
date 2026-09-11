@@ -41,7 +41,7 @@ def test_register_user_with_default_tenant_is_single_commit():
 
 def test_join_requires_tenant_filter_per_table():
     # only one side filtered
-    with pytest.raises(SQLSafetyError, match="JOIN"):
+    with pytest.raises(SQLSafetyError, match="JOIN|tenant"):
         assert_tenant_scope(
             "SELECT s.id FROM session s JOIN message m ON s.id = m.session_id "
             "WHERE s.tenant_id = 10",
@@ -57,6 +57,29 @@ def test_join_requires_tenant_filter_per_table():
     assert_tenant_scope(
         "SELECT s.id FROM session s JOIN message m ON s.id = m.session_id "
         "WHERE s.tenant_id = :tenant_id AND m.tenant_id = :tenant_id",
+        10,
+    )
+
+
+def test_join_blocks_duplicate_predicate_padding():
+    """Repeating the same alias tenant filter must not cover the other table."""
+    with pytest.raises(SQLSafetyError, match="JOIN|tenant"):
+        assert_tenant_scope(
+            "SELECT s.id FROM session s JOIN message m ON s.id = m.session_id "
+            "WHERE s.tenant_id = 10 AND s.tenant_id = 10",
+            10,
+        )
+
+
+def test_comma_from_requires_per_table_tenant_filter():
+    with pytest.raises(SQLSafetyError, match="Multi-table|JOIN|tenant"):
+        assert_tenant_scope(
+            "SELECT a.id FROM session a, message b WHERE a.tenant_id = 10",
+            10,
+        )
+    assert_tenant_scope(
+        "SELECT a.id FROM session a, message b "
+        "WHERE a.tenant_id = 10 AND b.tenant_id = 10",
         10,
     )
 
