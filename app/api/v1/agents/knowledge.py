@@ -7,6 +7,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 
 from app.api.v1.auth import get_current_tenant, get_current_user
+from app.core.config import settings
 from app.models.tenant import Tenant
 from app.models.user import User
 from app.schemas.agents import (
@@ -16,7 +17,7 @@ from app.schemas.agents import (
     KnowledgeDocumentResponse,
 )
 from app.services.database import database_service as db_service
-from app.services.storage import save_tenant_upload
+from app.services.storage import save_tenant_kb_upload
 
 router = APIRouter()
 
@@ -109,21 +110,35 @@ async def upload_document_file(
     user: User = Depends(get_current_user),
     tenant: Tenant = Depends(get_current_tenant),
 ):
-    """Upload a file into the tenant KB namespace on disk + DB row."""
+    """Upload a file into ``UPLOAD_DIR/{tenant_id}/kb/{kb_id}/`` (chunked, size-capped)."""
     _ = user
     kb = await db_service.get_knowledge_base(tenant.id, kb_id)
     if kb is None:
         raise HTTPException(status_code=404, detail="Knowledge base not found")
-    data = await file.read()
+
+    max_bytes = settings.MAX_UPLOAD_BYTES
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Upload exceeds max size of {max_bytes} bytes",
+            )
+        chunks.append(chunk)
+    data = b"".join(chunks)
     if not data:
         raise HTTPException(status_code=400, detail="Empty file")
-    # Store under tenant root; prefix path with tenant_id/kb/{kb_id}/ via filename
-    filename = f"kb/{kb_id}/{file.filename or 'upload.bin'}"
+
     try:
-        file_ref = save_tenant_upload(tenant.id, filename, data)
+        file_ref = save_tenant_kb_upload(tenant.id, kb_id, file.filename or "upload.bin", data)
     except (ValueError, PermissionError) as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    # Best-effort text decode for search
+
     content = ""
     try:
         content = data.decode("utf-8")

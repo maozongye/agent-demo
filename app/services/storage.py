@@ -1,4 +1,4 @@
-"""Tenant-isolated local file storage for contract uploads."""
+"""Tenant-isolated local file storage for contract and knowledge uploads."""
 
 from __future__ import annotations
 
@@ -58,3 +58,24 @@ def read_tenant_file(tenant_id: int, file_ref: str) -> bytes:
     if not path.is_file():
         raise FileNotFoundError(file_ref)
     return path.read_bytes()
+
+
+def save_tenant_kb_upload(tenant_id: int, kb_id: int, filename: str, data: bytes) -> str:
+    """Save bytes under ``{tenant_id}/kb/{kb_id}/``; return relative file_ref."""
+    if not data:
+        raise ValueError("Empty upload")
+    if int(kb_id) <= 0:
+        raise ValueError("Invalid knowledge base id")
+    safe = _safe_filename(filename)
+    rel = f"{tenant_id}/kb/{int(kb_id)}/{uuid.uuid4().hex}_{safe}"
+    root = tenant_root(tenant_id)
+    path = (settings.UPLOAD_DIR / rel).resolve()
+    if not path.is_relative_to(root):
+        raise PermissionError("Invalid upload path")
+    # Must stay under kb/{kb_id}/
+    kb_root = (root / "kb" / str(int(kb_id))).resolve()
+    if not path.is_relative_to(kb_root):
+        raise PermissionError("Invalid knowledge-base upload path")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    return rel

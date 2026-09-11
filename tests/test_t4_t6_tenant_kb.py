@@ -198,3 +198,76 @@ def test_knowledge_api_tenant_isolation(monkeypatch, tmp_path):
         ).status_code
         == 404
     )
+
+
+
+def test_save_tenant_kb_upload_uses_kb_subdir(tmp_path, monkeypatch):
+    from app.core.config import settings
+    from app.services.storage import save_tenant_kb_upload, resolve_tenant_file
+
+    monkeypatch.setattr(settings, "UPLOAD_DIR", tmp_path)
+    ref = save_tenant_kb_upload(7, 3, "note.txt", b"hello kb")
+    assert ref.startswith("7/kb/3/")
+    assert ref.endswith("note.txt") or "note.txt" in ref
+    path = resolve_tenant_file(7, ref)
+    assert path.is_file()
+    assert b"hello kb" == path.read_bytes()
+    # nested under kb/3
+    assert path.parent.name == "3"
+    assert path.parent.parent.name == "kb"
+
+
+def test_kb_upload_rejects_oversized_and_uses_kb_subdir(monkeypatch, tmp_path):
+    import app.api.v1.agents.knowledge as kb_mod
+    from app.core.config import settings
+    from datetime import UTC, datetime
+
+    monkeypatch.setattr(settings, "UPLOAD_DIR", tmp_path)
+    monkeypatch.setattr(settings, "MAX_UPLOAD_BYTES", 16)
+
+    store = {"docs": {}, "seq": 1}
+
+    class FakeDB:
+        async def get_knowledge_base(self, tenant_id, kb_id):
+            if tenant_id == 10 and kb_id == 3:
+                return KnowledgeBase(
+                    id=3, tenant_id=10, name="Docs", created_at=datetime.now(UTC)
+                )
+            return None
+
+        async def create_knowledge_document(self, **kwargs):
+            did = store["seq"]
+            store["seq"] += 1
+            doc = KnowledgeDocument(id=did, created_at=datetime.now(UTC), **kwargs)
+            store["docs"][did] = doc
+            return doc
+
+    monkeypatch.setattr(kb_mod, "db_service", FakeDB())
+    app = FastAPI()
+    app.include_router(kb_mod.router, prefix="/agents/knowledge")
+
+    async def user():
+        return _user()
+
+    async def tenant():
+        return _tenant(10)
+
+    app.dependency_overrides[kb_mod.get_current_user] = user
+    app.dependency_overrides[kb_mod.get_current_tenant] = tenant
+    client = TestClient(app)
+
+    big = client.post(
+        "/agents/knowledge/knowledge-bases/3/upload",
+        files={"file": ("big.txt", b"x" * 64, "text/plain")},
+    )
+    assert big.status_code == 413, big.text
+
+    ok = client.post(
+        "/agents/knowledge/knowledge-bases/3/upload",
+        files={"file": ("note.txt", b"hello", "text/plain")},
+        data={"title": "Note"},
+    )
+    assert ok.status_code == 200, ok.text
+    ref = ok.json()["file_ref"]
+    assert ref.startswith("10/kb/3/")
+    assert (tmp_path / ref).is_file()
