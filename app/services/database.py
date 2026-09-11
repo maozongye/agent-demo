@@ -20,6 +20,7 @@ from app.core.config import (
     settings,
 )
 from app.core.logging import logger
+from app.models.email_audit import EmailAuditLog
 from app.models.email_draft import EmailDraft, EmailStatus
 from app.models.knowledge_base import KnowledgeBase
 from app.models.message import Message
@@ -63,9 +64,10 @@ class DatabaseService:
                 pool_size=pool_size,
                 max_overflow=max_overflow,
             )
-        except SQLAlchemyError as e:
+        except Exception as e:
+            # Include OperationalError and other connect failures so unit tests can run without Postgres.
             logger.error("database_initialization_error", error=str(e), environment=settings.ENVIRONMENT.value)
-            # In production/test, don't raise — allow app/unit tests to start without a live DB
+            self.engine = None
             if settings.ENVIRONMENT not in (Environment.PRODUCTION, Environment.TEST):
                 raise
 
@@ -350,7 +352,17 @@ class DatabaseService:
         return memberships[0].tenant_id
 
     async def create_email_draft(
-        self, tenant_id: int, subject: str, body: str, to_address: str
+        self,
+        tenant_id: int,
+        subject: str,
+        body: str,
+        to_address: str,
+        *,
+        category: str = "",
+        category_confidence: float = 0.0,
+        inbound_from: str = "",
+        inbound_subject: str = "",
+        inbound_body: str = "",
     ) -> EmailDraft:
         """Persist a new email draft in draft status."""
         with Session(self.engine) as session:
@@ -360,6 +372,11 @@ class DatabaseService:
                 subject=subject,
                 body=body,
                 to_address=to_address,
+                category=category,
+                category_confidence=category_confidence,
+                inbound_from=inbound_from,
+                inbound_subject=inbound_subject,
+                inbound_body=inbound_body,
             )
             session.add(draft)
             session.commit()
@@ -383,6 +400,38 @@ class DatabaseService:
             session.refresh(merged)
             return merged
 
+
+    async def add_email_audit(
+        self,
+        *,
+        tenant_id: int,
+        draft_id: int,
+        actor_user_id: int,
+        action: str,
+        detail: str = "",
+    ) -> EmailAuditLog:
+        """Append an email audit log row."""
+        with Session(self.engine) as session:
+            row = EmailAuditLog(
+                tenant_id=tenant_id,
+                draft_id=draft_id,
+                actor_user_id=actor_user_id,
+                action=action,
+                detail=detail,
+            )
+            session.add(row)
+            session.commit()
+            session.refresh(row)
+            return row
+
+    async def list_email_audits(self, tenant_id: int, draft_id: int) -> list[EmailAuditLog]:
+        """List audit rows for a draft in a tenant."""
+        with Session(self.engine) as session:
+            stmt = select(EmailAuditLog).where(
+                EmailAuditLog.tenant_id == tenant_id,
+                EmailAuditLog.draft_id == draft_id,
+            )
+            return list(session.exec(stmt).all())
 
 
 # Create a singleton instance
