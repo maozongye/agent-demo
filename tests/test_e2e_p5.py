@@ -195,7 +195,7 @@ def e2e_client(monkeypatch, tmp_path):
                 return None
             return d
 
-        async def save_email_draft(self, draft):
+        async def save_email_draft(self, draft, *, tenant_id=None):
             state["drafts"][draft.id] = draft
             return draft
 

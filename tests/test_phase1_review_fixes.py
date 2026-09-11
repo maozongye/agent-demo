@@ -95,7 +95,7 @@ def _build_email_app(monkeypatch, *, role: str, draft: EmailDraft, tenant_id: in
             side_effect=lambda draft_id, tid: draft if draft.id == draft_id and draft.tenant_id == tid else None
         ),
     )
-    monkeypatch.setattr(email_mod.db_service, "save_email_draft", AsyncMock(side_effect=lambda d: d))
+    monkeypatch.setattr(email_mod.db_service, "save_email_draft", AsyncMock(side_effect=lambda d, tenant_id=None: d))
     monkeypatch.setattr(email_mod.db_service, "add_email_audit", AsyncMock(return_value=None))
 
     app = FastAPI()
