@@ -22,3 +22,7 @@ CREATE TABLE IF NOT EXISTS contract_review (
 );
 CREATE INDEX IF NOT EXISTS idx_contract_review_tenant_id ON contract_review(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_contract_review_document_id ON contract_review(document_id);
+
+INSERT INTO schema_migrations (version)
+VALUES ('002')
+ON CONFLICT (version) DO NOTHING;

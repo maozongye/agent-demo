@@ -30,9 +30,9 @@ def save_tenant_upload(tenant_id: int, filename: str, data: bytes) -> str:
         raise ValueError("Empty upload")
     safe = _safe_filename(filename)
     rel = f"{tenant_id}/{uuid.uuid4().hex}_{safe}"
-    path = (settings.UPLOAD_DIR / rel).resolve()
     root = tenant_root(tenant_id)
-    if not str(path).startswith(str(root)):
+    path = (settings.UPLOAD_DIR / rel).resolve()
+    if not path.is_relative_to(root):
         raise PermissionError("Invalid upload path")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(data)
@@ -41,16 +41,14 @@ def save_tenant_upload(tenant_id: int, filename: str, data: bytes) -> str:
 
 def resolve_tenant_file(tenant_id: int, file_ref: str) -> Path:
     """Resolve a file_ref ensuring it stays inside the tenant directory."""
-    if not file_ref or ".." in file_ref or file_ref.startswith("/"):
+    if not file_ref or file_ref.startswith("/") or ".." in Path(file_ref).parts:
         raise PermissionError("Invalid file reference")
-    path = (settings.UPLOAD_DIR / file_ref).resolve()
-    root = tenant_root(tenant_id)
-    if not str(path).startswith(str(root) + "/") and path != root:
-        # must be under tenant root
-        if not str(path).startswith(str(root)):
-            raise PermissionError("Cross-tenant file access denied")
     expected_prefix = f"{tenant_id}/"
     if not file_ref.startswith(expected_prefix):
+        raise PermissionError("Cross-tenant file access denied")
+    root = tenant_root(tenant_id)
+    path = (settings.UPLOAD_DIR / file_ref).resolve()
+    if not path.is_relative_to(root):
         raise PermissionError("Cross-tenant file access denied")
     return path
 

@@ -8,6 +8,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from app.api.v1.auth import get_current_tenant, get_current_user
+from app.core.config import settings
 from app.core.langgraph.contract_review import run_contract_review
 from app.core.logging import logger
 from app.models.tenant import Tenant
@@ -41,7 +42,21 @@ async def upload_contract(
     filename = file.filename or "contract.pdf"
     if not filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF uploads are supported")
-    data = await file.read()
+    max_bytes = settings.MAX_UPLOAD_BYTES
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Upload exceeds max size of {max_bytes} bytes",
+            )
+        chunks.append(chunk)
+    data = b"".join(chunks)
     if not data:
         raise HTTPException(status_code=400, detail="Empty file")
     content_type = file.content_type or "application/pdf"

@@ -181,3 +181,45 @@ def test_upload_and_review_http(monkeypatch, tmp_path):
     # Empty review payload
     empty = client.post("/agents/contract/review", json={})
     assert empty.status_code == 400
+
+
+def test_storage_rejects_path_traversal(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "UPLOAD_DIR", tmp_path)
+    save_tenant_upload(1, "ok.pdf", b"%PDF-1.4 x")
+    with pytest.raises(PermissionError):
+        resolve_tenant_file(1, "../1/secret")
+    with pytest.raises(PermissionError):
+        resolve_tenant_file(1, "/etc/passwd")
+    with pytest.raises(PermissionError):
+        resolve_tenant_file(1, "2/other.pdf")
+
+
+def test_upload_rejects_oversized_file(monkeypatch, tmp_path):
+    import app.api.v1.agents.contract as contract_mod
+    import app.api.v1.auth as auth_mod
+    from datetime import UTC, datetime
+    from app.models.contract import ContractDocument
+
+    monkeypatch.setattr(settings, "UPLOAD_DIR", tmp_path)
+    monkeypatch.setattr(settings, "MAX_UPLOAD_BYTES", 16)
+
+    class FakeContractService:
+        def create_document(self, **kwargs):
+            return ContractDocument(id=1, created_at=datetime.now(UTC), **kwargs)
+
+    monkeypatch.setattr(contract_mod, "contract_service", FakeContractService())
+    app = FastAPI()
+    app.include_router(contract_mod.router, prefix="/agents/contract")
+
+    async def user():
+        return _user()
+
+    async def tenant():
+        return _tenant(10)
+
+    app.dependency_overrides[contract_mod.get_current_user] = user
+    app.dependency_overrides[contract_mod.get_current_tenant] = tenant
+    client = TestClient(app)
+    files = {"file": ("big.pdf", b"x" * 64, "application/pdf")}
+    resp = client.post("/agents/contract/upload", files=files)
+    assert resp.status_code == 413
