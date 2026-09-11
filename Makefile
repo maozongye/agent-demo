@@ -4,15 +4,17 @@ install:
 
 set-env:
 	@if [ -z "$(ENV)" ]; then \
-		echo "ENV is not set. Usage: make set-env ENV=development|staging|production"; \
+		echo "ENV is not set. Usage: source ./scripts/set_env.sh <development|staging|production|test>"; \
+		echo "(make set-env cannot export vars into your current shell — you must source.)"; \
 		exit 1; \
 	fi
 	@if [ "$(ENV)" != "development" ] && [ "$(ENV)" != "staging" ] && [ "$(ENV)" != "production" ] && [ "$(ENV)" != "test" ]; then \
 		echo "ENV is not valid. Must be one of: development, staging, production, test"; \
 		exit 1; \
 	fi
-	@echo "Setting environment to $(ENV)"
-	@bash -c "source scripts/set_env.sh $(ENV)"
+	@echo "NOTE: Make runs in a subshell, so variables would NOT stick in your terminal."
+	@echo "Run this instead (loads .env.$(ENV) into the *current* shell):"
+	@echo "  source ./scripts/set_env.sh $(ENV)"
 
 prod:
 	@echo "Starting server in production environment"

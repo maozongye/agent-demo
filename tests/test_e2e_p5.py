@@ -1,6 +1,9 @@
 """Phase 5 near-E2E: auth/tenant → contract → email gates → report NL→SQL.
 
-Uses TestClient + fakes (no live Postgres/LLM). Cross-tenant denials included.
+Uses TestClient + fakes (no live Postgres/LLM/Redis). Cross-tenant denials included.
+Attaches a disabled SlowAPI limiter on ``app.state.limiter`` (same pattern as
+phase1 auth tests) so ``/auth/register`` is not broken by rate limiting.
+Member-role approve/send matrix remains in email unit tests, not this path.
 """
 
 from __future__ import annotations
@@ -264,7 +267,15 @@ def e2e_client(monkeypatch, tmp_path):
 
     monkeypatch.setattr(email_mod, "require_tenant_role", fake_require)
 
+    from slowapi import Limiter
+    from slowapi.util import get_remote_address
+
     app = FastAPI()
+    # SlowAPI requires app.state.limiter; disable so register/login are not rate-limited in tests
+    limiter = Limiter(key_func=get_remote_address, enabled=False)
+    app.state.limiter = limiter
+    monkeypatch.setattr(auth_mod, "limiter", limiter)
+
     app.include_router(auth_mod.router, prefix="/auth")
     app.include_router(contract_mod.router, prefix="/agents/contract")
     app.include_router(email_mod.router, prefix="/agents/email")
