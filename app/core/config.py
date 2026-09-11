@@ -257,6 +257,8 @@ _WEAK_JWT_SECRETS = {
     "test",
     "dev",
     "development",
+    # docker-compose.yml historical default — must fail-fast outside TEST
+    "supersecretkeythatshouldbechangedforproduction",
 }
 
 _TEST_JWT_SECRET = "test-only-jwt-secret-do-not-use-elsewhere"

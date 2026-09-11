@@ -255,3 +255,7 @@ def test_validate_jwt_secret_fails_outside_test():
         validate_jwt_secret("your-jwt-secret-key", Environment.DEVELOPMENT)
     assert validate_jwt_secret("", Environment.TEST) == "test-only-jwt-secret-do-not-use-elsewhere"
     assert validate_jwt_secret("strong-enough-secret-value", Environment.PRODUCTION) == "strong-enough-secret-value"
+    with pytest.raises(RuntimeError, match="JWT_SECRET_KEY"):
+        validate_jwt_secret(
+            "supersecretkeythatshouldbechangedforproduction", Environment.DEVELOPMENT
+        )

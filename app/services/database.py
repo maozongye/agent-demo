@@ -158,66 +158,87 @@ class DatabaseService:
             logger.info("session_created", session_id=session_id, user_id=user_id, tenant_id=tenant_id, name=name)
             return chat_session
 
-    async def get_session(self, session_id: str) -> Optional[ChatSession]:
-        """Get a session by ID.
+    async def get_session(
+        self, session_id: str, tenant_id: Optional[int] = None
+    ) -> Optional[ChatSession]:
+        """Get a session by ID, optionally scoped to a tenant.
 
         Args:
             session_id: The ID of the session to retrieve
+            tenant_id: When set, return None if the session belongs to another tenant
 
         Returns:
-            Optional[ChatSession]: The session if found, None otherwise
+            Optional[ChatSession]: The session if found (and in-tenant), else None
         """
         with Session(self.engine) as session:
             chat_session = session.get(ChatSession, session_id)
+            if chat_session is None:
+                return None
+            if tenant_id is not None and chat_session.tenant_id != tenant_id:
+                return None
             return chat_session
 
-    async def get_user_sessions(self, user_id: int) -> List[ChatSession]:
-        """Get all sessions for a user.
+    async def get_user_sessions(
+        self, user_id: int, tenant_id: Optional[int] = None
+    ) -> List[ChatSession]:
+        """Get sessions for a user, optionally filtered by active tenant.
 
         Args:
             user_id: The ID of the user
+            tenant_id: When set, only return sessions for this tenant
 
         Returns:
             List[ChatSession]: List of user's sessions
         """
         with Session(self.engine) as session:
-            statement = select(ChatSession).where(ChatSession.user_id == user_id).order_by(ChatSession.created_at)
+            statement = select(ChatSession).where(ChatSession.user_id == user_id)
+            if tenant_id is not None:
+                statement = statement.where(ChatSession.tenant_id == tenant_id)
+            statement = statement.order_by(ChatSession.created_at)
             sessions = session.exec(statement).all()
             return sessions
 
-    async def update_session_name(self, session_id: str, name: str) -> ChatSession:
-        """Update a session's name.
+    async def update_session_name(
+        self, session_id: str, name: str, tenant_id: Optional[int] = None
+    ) -> ChatSession:
+        """Update a session's name, optionally scoped to a tenant.
 
         Args:
             session_id: The ID of the session to update
             name: The new name for the session
+            tenant_id: When set, treat cross-tenant sessions as not found
 
         Returns:
             ChatSession: The updated session
 
         Raises:
-            HTTPException: If session is not found
+            HTTPException: If session is not found (or wrong tenant)
         """
         with Session(self.engine) as session:
             chat_session = session.get(ChatSession, session_id)
-            if not chat_session:
+            if not chat_session or (
+                tenant_id is not None and chat_session.tenant_id != tenant_id
+            ):
                 raise HTTPException(status_code=404, detail="Session not found")
 
             chat_session.name = name
             session.add(chat_session)
             session.commit()
             session.refresh(chat_session)
-            logger.info("session_name_updated", session_id=session_id, name=name)
+            logger.info("session_name_updated", session_id=session_id, name=name, tenant_id=tenant_id)
             return chat_session
 
-    async def delete_session(self, session_id: str) -> bool:
-        """Delete a session.
+    async def delete_session(
+        self, session_id: str, tenant_id: Optional[int] = None
+    ) -> bool:
+        """Delete a session, optionally scoped to a tenant.
 
         Args:
             session_id: The ID of the session to delete
+            tenant_id: When set, refuse to delete sessions from another tenant
 
         Returns:
-            bool: True if deletion was successful
+            bool: True if deletion was successful, False if not found / wrong tenant
 
         Raises:
             HTTPException: If there's an error deleting the session
@@ -225,12 +246,16 @@ class DatabaseService:
         try:
             with Session(self.engine) as session:
                 chat_session = session.get(ChatSession, session_id)
-                if not chat_session:
+                if not chat_session or (
+                    tenant_id is not None and chat_session.tenant_id != tenant_id
+                ):
                     return False
                 session.delete(chat_session)
                 session.commit()
-                logger.info("session_deleted", session_id=session_id)
+                logger.info("session_deleted", session_id=session_id, tenant_id=tenant_id)
                 return True
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error("error_deleting_session", session_id=session_id, error=e)
             raise HTTPException(status_code=500, detail="Error deleting session")
@@ -329,6 +354,54 @@ class DatabaseService:
             session.refresh(membership)
             logger.info("membership_created", user_id=user_id, tenant_id=tenant_id, role=role)
             return membership
+
+    async def register_user_with_default_tenant(
+        self,
+        email: str,
+        password: str,
+        tenant_name: str,
+        tenant_slug: str,
+        *,
+        role: str = MembershipRole.OWNER.value,
+    ) -> tuple[User, Tenant, TenantMembership]:
+        """Atomically create user + default personal tenant + membership.
+
+        All three rows are inserted in a single DB transaction/commit so a
+        partial registration cannot leave an orphaned user without a tenant.
+
+        Args:
+            email: User email.
+            password: Already-hashed password.
+            tenant_name: Display name for the personal tenant.
+            tenant_slug: Unique slug for the personal tenant.
+            role: Membership role (defaults to owner).
+
+        Returns:
+            tuple[User, Tenant, TenantMembership]: Created entities.
+        """
+        with Session(self.engine) as session:
+            user = User(email=email, hashed_password=password)
+            session.add(user)
+            session.flush()  # allocate user.id before FK inserts
+
+            tenant = Tenant(name=tenant_name, slug=tenant_slug, status=TenantStatus.ACTIVE.value)
+            session.add(tenant)
+            session.flush()
+
+            membership = TenantMembership(user_id=user.id, tenant_id=tenant.id, role=role)
+            session.add(membership)
+            session.commit()
+            session.refresh(user)
+            session.refresh(tenant)
+            session.refresh(membership)
+            logger.info(
+                "user_registered_with_tenant",
+                email=email,
+                user_id=user.id,
+                tenant_id=tenant.id,
+                role=role,
+            )
+            return user, tenant, membership
 
     async def get_membership(self, user_id: int, tenant_id: int) -> Optional[TenantMembership]:
         """Return membership if user belongs to tenant."""

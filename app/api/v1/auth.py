@@ -112,7 +112,9 @@ async def get_current_user(
 async def get_current_session(
     credentials: HTTPAuthorizationCredentials = Depends(security),
 ) -> Session:
-    """Get the current session ID from the token.
+    """Get the current session from the token, scoped to the JWT tenant claim.
+
+    Cross-tenant session IDs resolve as 404 (no leak of existence).
 
     Args:
         credentials: The HTTP authorization credentials containing the JWT token.
@@ -121,7 +123,7 @@ async def get_current_session(
         Session: The session extracted from the token.
 
     Raises:
-        HTTPException: If the token is invalid or missing.
+        HTTPException: If the token is invalid, missing, or the session is out of tenant.
     """
     try:
         token = sanitize_string(credentials.credentials)
@@ -136,17 +138,32 @@ async def get_current_session(
             )
 
         session_id = sanitize_string(session_id)
+        tenant_id = get_tenant_id_from_token(token)
 
-        session = await db_service.get_session(session_id)
+        session = await db_service.get_session(session_id, tenant_id=tenant_id)
         if session is None:
-            logger.error("session_not_found", session_id=session_id)
+            logger.error("session_not_found", session_id=session_id, tenant_id=tenant_id)
             raise HTTPException(
                 status_code=404,
                 detail="Session not found",
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
+        # Defense-in-depth: if JWT lacked tenant_id, still require session.tenant_id match
+        # when a claim is present; when claim is absent, reject sessions with a tenant set
+        # only if we can prove mismatch — prefer requiring claim for multi-tenant sessions.
+        if tenant_id is not None and session.tenant_id is not None and session.tenant_id != tenant_id:
+            logger.warning(
+                "session_tenant_mismatch",
+                session_id=session_id,
+                session_tenant_id=session.tenant_id,
+                token_tenant_id=tenant_id,
+            )
+            raise HTTPException(status_code=404, detail="Session not found")
+
         return session
+    except HTTPException:
+        raise
     except ValueError as ve:
         logger.error("token_validation_failed", error=str(ve), exc_info=True)
         raise HTTPException(
@@ -273,14 +290,13 @@ async def register_user(request: Request, user_data: UserCreate):
         if await db_service.get_user_by_email(sanitized_email):
             raise HTTPException(status_code=400, detail="Email already registered")
 
-        user = await db_service.create_user(email=sanitized_email, password=User.hash_password(password))
-
-        # Prefer: register creates a default personal tenant so JWT can include tenant_id
-        tenant = await db_service.create_tenant(
-            name=f"{sanitized_email} workspace",
-            slug=_slugify_email(sanitized_email),
+        user, tenant, _membership = await db_service.register_user_with_default_tenant(
+            email=sanitized_email,
+            password=User.hash_password(password),
+            tenant_name=f"{sanitized_email} workspace",
+            tenant_slug=_slugify_email(sanitized_email),
+            role=MembershipRole.OWNER.value,
         )
-        await db_service.create_membership(user.id, tenant.id, role=MembershipRole.OWNER.value)
 
         token = create_access_token(str(user.id), tenant_id=tenant.id)
 
@@ -376,12 +392,12 @@ async def create_session(
 async def update_session_name(
     session_id: str, name: str = Form(...), current_session: Session = Depends(get_current_session)
 ):
-    """Update a session's name.
+    """Update a session's name within the active tenant.
 
     Args:
         session_id: The ID of the session to update
         name: The new name for the session
-        current_session: The current session from auth
+        current_session: The current session from auth (already tenant-scoped)
 
     Returns:
         SessionResponse: The updated session information
@@ -394,28 +410,38 @@ async def update_session_name(
         if sanitized_session_id != sanitized_current_session:
             raise HTTPException(status_code=403, detail="Cannot modify other sessions")
 
-        session = await db_service.update_session_name(sanitized_session_id, sanitized_name)
+        session = await db_service.update_session_name(
+            sanitized_session_id,
+            sanitized_name,
+            tenant_id=current_session.tenant_id,
+        )
 
         token = create_access_token(sanitized_session_id, tenant_id=session.tenant_id)
 
         return SessionResponse(session_id=sanitized_session_id, name=session.name, token=token)
+    except HTTPException:
+        raise
     except ValueError as ve:
         logger.error("session_update_validation_failed", error=str(ve), session_id=session_id, exc_info=True)
         raise HTTPException(status_code=422, detail=str(ve))
 
 
 @router.get("/sessions", response_model=List[SessionResponse])
-async def get_user_sessions(user: User = Depends(get_current_user)):
-    """Get all session IDs for the authenticated user.
+async def get_user_sessions(
+    user: User = Depends(get_current_user),
+    tenant: Tenant = Depends(get_current_tenant),
+):
+    """Get session IDs for the authenticated user in the active tenant.
 
     Args:
         user: The authenticated user
+        tenant: The resolved active tenant
 
     Returns:
-        List[SessionResponse]: List of session IDs
+        List[SessionResponse]: List of in-tenant session IDs
     """
     try:
-        sessions = await db_service.get_user_sessions(user.id)
+        sessions = await db_service.get_user_sessions(user.id, tenant_id=tenant.id)
         return [
             SessionResponse(
                 session_id=sanitize_string(session.id),
@@ -427,6 +453,35 @@ async def get_user_sessions(user: User = Depends(get_current_user)):
     except ValueError as ve:
         logger.error("get_sessions_validation_failed", user_id=user.id, error=str(ve), exc_info=True)
         raise HTTPException(status_code=422, detail=str(ve))
+
+
+@router.delete("/session/{session_id}")
+async def delete_session(
+    session_id: str,
+    user: User = Depends(get_current_user),
+    tenant: Tenant = Depends(get_current_tenant),
+):
+    """Delete a session owned by the user in the active tenant.
+
+    Cross-tenant session IDs return 404 (no existence leak).
+
+    Args:
+        session_id: Session to delete
+        user: Authenticated user
+        tenant: Active tenant
+
+    Returns:
+        dict: Confirmation message
+    """
+    sanitized_session_id = sanitize_string(session_id)
+    existing = await db_service.get_session(sanitized_session_id, tenant_id=tenant.id)
+    if existing is None or existing.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    deleted = await db_service.delete_session(sanitized_session_id, tenant_id=tenant.id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return {"message": "Session deleted successfully"}
 
 
 @router.post("/tenants", response_model=TenantResponse)

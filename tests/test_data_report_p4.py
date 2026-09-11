@@ -237,3 +237,16 @@ def test_validate_sql_api_blocks_or_union(monkeypatch):
         ).status_code
         == 400
     )
+
+
+def test_join_tenant_isolation():
+    with pytest.raises(SQLSafetyError, match="JOIN"):
+        assert_tenant_scope(
+            "SELECT s.id FROM session s JOIN message m ON s.id = m.session_id WHERE s.tenant_id = 10",
+            10,
+        )
+    assert_tenant_scope(
+        "SELECT s.id FROM session s JOIN message m ON s.id = m.session_id "
+        "WHERE s.tenant_id = 10 AND m.tenant_id = 10",
+        10,
+    )
