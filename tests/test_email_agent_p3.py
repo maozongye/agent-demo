@@ -171,3 +171,40 @@ def test_cross_tenant_draft_404(monkeypatch):
     drafts[1].created_at = datetime.now(UTC)
     drafts[1].updated_at = datetime.now(UTC)
     assert client.get("/agents/email/drafts/1").status_code == 404
+
+
+def test_generate_reply_forbidden_when_approved_or_pending(monkeypatch):
+    drafts, audits = {}, []
+    client = _build_app(monkeypatch, role="owner", drafts=drafts, audits=audits)
+    for status in (EmailStatus.PENDING_APPROVAL.value, EmailStatus.APPROVED.value):
+        drafts[1] = create_draft_in_memory(10, "old", "old-body", "t@x.com", draft_id=1)
+        drafts[1].status = status
+        drafts[1].created_at = datetime.now(UTC)
+        drafts[1].updated_at = datetime.now(UTC)
+        original_subject = drafts[1].subject
+        resp = client.post("/agents/email/drafts/1/generate-reply")
+        assert resp.status_code == 403, status
+        assert drafts[1].subject == original_subject
+        # approved still cannot be silently edited then sent without going through rules —
+        # content unchanged; if approved, send still allowed only because content untouched
+    drafts[1].status = EmailStatus.APPROVED.value
+    assert client.post("/agents/email/drafts/1/send").status_code == 200
+
+
+def test_generate_reply_from_rejected_resets_to_draft_requires_reapproval(monkeypatch):
+    drafts, audits = {}, []
+    client = _build_app(monkeypatch, role="admin", drafts=drafts, audits=audits)
+    drafts[1] = create_draft_in_memory(10, "old", "Need help with a bug", "t@x.com", draft_id=1)
+    drafts[1].status = EmailStatus.REJECTED.value
+    drafts[1].inbound_subject = "Need help with a bug"
+    drafts[1].inbound_body = "there is a bug"
+    drafts[1].created_at = datetime.now(UTC)
+    drafts[1].updated_at = datetime.now(UTC)
+    resp = client.post("/agents/email/drafts/1/generate-reply")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == EmailStatus.DRAFT.value
+    # cannot send until re-approved
+    assert client.post("/agents/email/drafts/1/send").status_code == 403
+    drafts[1].status = EmailStatus.PENDING_APPROVAL.value
+    assert client.post("/agents/email/drafts/1/approve").status_code == 200
+    assert client.post("/agents/email/drafts/1/send").status_code == 200

@@ -142,12 +142,30 @@ async def generate_reply(
     user: User = Depends(get_current_user),
     tenant: Tenant = Depends(get_current_tenant),
 ) -> EmailDraftResponse:
-    """Regenerate reply subject/body via pipeline; remains in draft (never auto-sends)."""
+    """Regenerate reply subject/body via pipeline; never auto-sends.
+
+    Only ``draft`` or ``rejected`` may be edited in place. ``pending_approval`` /
+    ``approved`` content changes are refused (403) so approval cannot be bypassed
+    by silently rewriting subject/body. Callers must reject or wait and only edit
+    editable states — regenerating from rejected resets to ``draft`` requiring
+    re-approval before send.
+    """
     draft = await db_service.get_email_draft(draft_id, tenant.id)
     if draft is None:
         raise HTTPException(status_code=404, detail="Draft not found")
-    if draft.status == EmailStatus.SENT.value:
+    status = draft.status
+    if status == EmailStatus.SENT.value:
         raise HTTPException(status_code=403, detail="Cannot regenerate a sent email")
+    if status in {EmailStatus.PENDING_APPROVAL.value, EmailStatus.APPROVED.value}:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Cannot change content while pending_approval or approved; "
+                "reject first or leave for send. Regenerating would bypass re-approval."
+            ),
+        )
+    if status not in {EmailStatus.DRAFT.value, EmailStatus.REJECTED.value}:
+        raise HTTPException(status_code=403, detail=f"Cannot regenerate from status '{status}'")
     result = run_email_pipeline(
         draft.inbound_subject or draft.subject,
         draft.inbound_body or draft.body,
@@ -157,8 +175,17 @@ async def generate_reply(
     draft.body = result["reply_body"]
     draft.category = result["category"]
     draft.category_confidence = float(result["confidence"])
+    # rejected → draft so send requires a fresh approval cycle
+    if status == EmailStatus.REJECTED.value:
+        draft.status = EmailStatus.DRAFT.value
     draft = await db_service.save_email_draft(draft)
-    await _audit(tenant_id=tenant.id, draft_id=draft.id, user_id=user.id, action="generate_reply")
+    await _audit(
+        tenant_id=tenant.id,
+        draft_id=draft.id,
+        user_id=user.id,
+        action="generate_reply",
+        detail=f"from_status={status}; now={draft.status}",
+    )
     return _to_response(draft)
 
 
