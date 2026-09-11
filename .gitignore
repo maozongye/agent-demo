@@ -36,3 +36,6 @@ evals/reports/
 # Archives / IDE export bundles
 *.zip
 .vscode/*.zip
+
+# Uploaded contract PDFs (tenant-isolated local storage)
+data/uploads/
