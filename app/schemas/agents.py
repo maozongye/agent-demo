@@ -1,33 +1,49 @@
-"""Request/response schemas for agent stub endpoints."""
+
+"""Request/response schemas for agent endpoints."""
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
 
 class ContractReviewRequest(BaseModel):
-    """Contract review stub input."""
+    """Contract review input (document id and/or raw text)."""
 
-    text: Optional[str] = Field(default=None, description="Contract text to review")
-    file_ref: Optional[str] = Field(default=None, description="Optional file reference / URI")
+    document_id: Optional[int] = Field(default=None, description="Uploaded document id")
+    text: Optional[str] = Field(default=None, description="Inline contract text")
+    file_ref: Optional[str] = Field(default=None, description="Legacy file reference")
 
 
 class RiskFinding(BaseModel):
-    """Stub risk finding."""
+    """A detected contract risk."""
 
     severity: str
     clause: str
     summary: str
+    excerpt: Optional[str] = None
+
+
+class ContractDocumentResponse(BaseModel):
+    """Uploaded contract document metadata."""
+
+    id: int
+    tenant_id: int
+    filename: str
+    file_ref: str
+    content_type: str
+    created_at: Optional[datetime] = None
 
 
 class ContractReviewResponse(BaseModel):
-    """Stub contract review report."""
+    """Contract review report response."""
 
+    id: Optional[int] = None
     tenant_id: int
+    document_id: Optional[int] = None
+    status: str = "completed"
     findings: List[RiskFinding]
     report: str
-
 
 class EmailDraftCreate(BaseModel):
     """Create an email draft."""

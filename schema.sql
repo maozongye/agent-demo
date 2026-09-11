@@ -88,3 +88,30 @@ CREATE INDEX IF NOT EXISTS idx_tenant_membership_tenant_id ON tenant_membership(
 CREATE INDEX IF NOT EXISTS idx_knowledge_base_tenant_id ON knowledge_base(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_email_draft_tenant_id ON email_draft(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_email_draft_status ON email_draft(status);
+
+-- Contract review (Phase 2)
+CREATE TABLE IF NOT EXISTS contract_document (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER NOT NULL,
+    uploaded_by INTEGER NOT NULL,
+    filename TEXT NOT NULL,
+    file_ref TEXT NOT NULL,
+    content_type TEXT NOT NULL DEFAULT 'application/pdf',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (tenant_id) REFERENCES tenant(id) ON DELETE CASCADE,
+    FOREIGN KEY (uploaded_by) REFERENCES user(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS contract_review (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER NOT NULL,
+    document_id INTEGER,
+    status TEXT NOT NULL DEFAULT 'completed',
+    report_text TEXT NOT NULL DEFAULT '',
+    findings_json TEXT NOT NULL DEFAULT '[]',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (tenant_id) REFERENCES tenant(id) ON DELETE CASCADE,
+    FOREIGN KEY (document_id) REFERENCES contract_document(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_contract_document_tenant_id ON contract_document(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_contract_review_tenant_id ON contract_review(tenant_id);

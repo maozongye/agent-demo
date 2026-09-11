@@ -170,6 +170,9 @@ class Settings:
         self.POSTGRES_MAX_OVERFLOW = int(os.getenv("POSTGRES_MAX_OVERFLOW", "10"))
         self.CHECKPOINT_TABLES = ["checkpoint_blobs", "checkpoint_writes", "checkpoints"]
 
+        # Contract upload storage (tenant-isolated local filesystem)
+        self.UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "data/uploads"))
+
         # Rate Limiting Configuration
         self.RATE_LIMIT_DEFAULT = parse_list_from_env("RATE_LIMIT_DEFAULT", ["200 per day", "50 per hour"])
 
