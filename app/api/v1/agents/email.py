@@ -120,7 +120,7 @@ async def classify_draft(
     category, confidence, rationale = classify_email(source_subject, source_body)
     draft.category = category
     draft.category_confidence = confidence
-    draft = await db_service.save_email_draft(draft)
+    draft = await db_service.save_email_draft(draft, tenant_id=tenant.id)
     await _audit(
         tenant_id=tenant.id,
         draft_id=draft.id,
@@ -178,7 +178,7 @@ async def generate_reply(
     # rejected → draft so send requires a fresh approval cycle
     if status == EmailStatus.REJECTED.value:
         draft.status = EmailStatus.DRAFT.value
-    draft = await db_service.save_email_draft(draft)
+    draft = await db_service.save_email_draft(draft, tenant_id=tenant.id)
     await _audit(
         tenant_id=tenant.id,
         draft_id=draft.id,
@@ -200,7 +200,7 @@ async def submit_for_approval(
     if draft is None:
         raise HTTPException(status_code=404, detail="Draft not found")
     apply_transition(draft, EmailStatus.PENDING_APPROVAL)
-    draft = await db_service.save_email_draft(draft)
+    draft = await db_service.save_email_draft(draft, tenant_id=tenant.id)
     await _audit(tenant_id=tenant.id, draft_id=draft.id, user_id=user.id, action="submit")
     return _to_response(draft)
 
@@ -217,7 +217,7 @@ async def approve_draft(
     if draft is None:
         raise HTTPException(status_code=404, detail="Draft not found")
     apply_transition(draft, EmailStatus.APPROVED)
-    draft = await db_service.save_email_draft(draft)
+    draft = await db_service.save_email_draft(draft, tenant_id=tenant.id)
     await _audit(tenant_id=tenant.id, draft_id=draft.id, user_id=user.id, action="approve")
     return _to_response(draft)
 
@@ -234,7 +234,7 @@ async def reject_draft(
     if draft is None:
         raise HTTPException(status_code=404, detail="Draft not found")
     apply_transition(draft, EmailStatus.REJECTED)
-    draft = await db_service.save_email_draft(draft)
+    draft = await db_service.save_email_draft(draft, tenant_id=tenant.id)
     await _audit(tenant_id=tenant.id, draft_id=draft.id, user_id=user.id, action="reject")
     return _to_response(draft)
 
@@ -252,7 +252,7 @@ async def send_draft(
         raise HTTPException(status_code=404, detail="Draft not found")
     assert_can_send(draft.status)
     apply_transition(draft, EmailStatus.SENT)
-    draft = await db_service.save_email_draft(draft)
+    draft = await db_service.save_email_draft(draft, tenant_id=tenant.id)
     await _audit(tenant_id=tenant.id, draft_id=draft.id, user_id=user.id, action="send")
     return _to_response(draft)
 

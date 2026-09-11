@@ -10,4 +10,5 @@ Enterprise multi-tenant agent demo (contract / email / report) on FastAPI + Lang
 | [contract-review-agent.md](./contract-review-agent.md) | Contract agent API |
 | [email-agent.md](./email-agent.md) | Email agent API |
 | [data-report-agent.md](./data-report-agent.md) | Report / SQL sandbox agent |
+| [knowledge-base-agent.md](./knowledge-base-agent.md) | Tenant knowledge base upload/search |
 | [evals-and-ops.md](./evals-and-ops.md) | Eval CLI and ops make targets |

@@ -17,6 +17,7 @@
 | Contract | `/agents/contract` | `POST /upload` → `POST /review` → get document/review |
 | Email | `/agents/email` | ingest/draft → classify / generate-reply → submit → approve → send |
 | Report | `/agents/report` | `POST /nl-query` (NL→SQL + optional execute) / `POST /validate-sql` / get report |
+| Knowledge | `/agents/knowledge` | create KB / upload docs / tenant-scoped search |
 
 Call with `Authorization: Bearer <token>`. Optional `X-Tenant-Id` when the user has multiple memberships.
 

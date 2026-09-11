@@ -10,6 +10,7 @@ from app.models.data_report import DataReport
 from app.models.email_audit import EmailAuditLog
 from app.models.email_draft import EmailDraft
 from app.models.knowledge_base import KnowledgeBase
+from app.models.knowledge_document import KnowledgeDocument
 from app.models.message import Message
 from app.models.session import Session
 from app.models.tenant import Tenant, TenantMembership
@@ -22,6 +23,7 @@ __all__ = [
     "Tenant",
     "TenantMembership",
     "KnowledgeBase",
+    "KnowledgeDocument",
     "EmailDraft",
     "EmailAuditLog",
     "ContractDocument",

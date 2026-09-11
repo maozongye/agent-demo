@@ -1,4 +1,4 @@
-"""Knowledge base stub model for tenant-isolated document stores."""
+"""Knowledge base namespace model for tenant-isolated document stores."""
 
 from typing import Optional
 
@@ -8,7 +8,7 @@ from app.models.base import BaseModel
 
 
 class KnowledgeBase(BaseModel, table=True):
-    """Stub knowledge base scoped to a tenant.
+    """Per-tenant knowledge base namespace.
 
     Attributes:
         id: Primary key.

@@ -24,6 +24,7 @@ from app.models.data_report import DataReport
 from app.models.email_audit import EmailAuditLog
 from app.models.email_draft import EmailDraft, EmailStatus
 from app.models.knowledge_base import KnowledgeBase
+from app.models.knowledge_document import KnowledgeDocument
 from app.models.message import Message
 from app.models.session import Session as ChatSession
 from app.models.tenant import MembershipRole, Tenant, TenantMembership, TenantStatus
@@ -260,36 +261,49 @@ class DatabaseService:
             logger.error("error_deleting_session", session_id=session_id, error=e)
             raise HTTPException(status_code=500, detail="Error deleting session")
 
-    async def get_messages_by_session_id(self, session_id: str) -> List[Message]:
-        """Get all messages by session ID.
+    async def get_messages_by_session_id(self, session_id: str, *, tenant_id: int) -> List[Message]:
+        """Get all messages for a session owned by the active tenant.
 
         Args:
             session_id: The ID of the session
+            tenant_id: Active tenant (required — cross-tenant returns empty)
 
         Returns:
-            List[Message]: List of messages in the session
+            List[Message]: Messages in the session, or empty if missing / wrong tenant
         """
+        chat = await self.get_session(session_id, tenant_id=tenant_id)
+        if chat is None:
+            return []
         with Session(self.engine) as session:
             statement = select(Message).where(Message.session_id == session_id).order_by(Message.created_at)
-            messages = session.exec(statement).all()
-            return messages
+            return list(session.exec(statement).all())
 
-    async def save_messages(self, messages: List[PydanticMessage], session_id: str) -> List[Message]:
-        """Save a message to the database.
+    async def save_messages(
+        self, messages: List[PydanticMessage], session_id: str, *, tenant_id: int
+    ) -> List[Message]:
+        """Save messages to a session owned by the active tenant.
 
         Args:
             messages: The messages to save
             session_id: The ID of the session
+            tenant_id: Active tenant (required)
+
+        Raises:
+            HTTPException: 404 if session missing or belongs to another tenant
         """
+        chat = await self.get_session(session_id, tenant_id=tenant_id)
+        if chat is None:
+            raise HTTPException(status_code=404, detail="Session not found")
         with Session(self.engine) as session:
-            messages = [
+            rows = [
                 Message(session_id=session_id, role=message.role, content=message.content) for message in messages
             ]
-            session.add_all(messages)
+            session.add_all(rows)
             session.commit()
-            session.refresh_all(messages)
-            logger.info("messages_saved", session_id=session_id, role=messages[0].role)
-            return messages
+            for row in rows:
+                session.refresh(row)
+            logger.info("messages_saved", session_id=session_id, tenant_id=tenant_id, role=rows[0].role)
+            return rows
 
     def get_session_maker(self):
         """Get a session maker for creating database sessions.
@@ -466,9 +480,20 @@ class DatabaseService:
                 return None
             return draft
 
-    async def save_email_draft(self, draft: EmailDraft) -> EmailDraft:
-        """Persist updates to an email draft."""
+    async def save_email_draft(self, draft: EmailDraft, *, tenant_id: int | None = None) -> EmailDraft:
+        """Persist updates to an email draft.
+
+        When ``tenant_id`` is provided, refuse to save a draft that belongs to
+        another tenant (defense-in-depth for callers that already loaded by id).
+        """
+        if tenant_id is not None and draft.tenant_id != tenant_id:
+            raise HTTPException(status_code=404, detail="Draft not found")
         with Session(self.engine) as session:
+            # Re-load under tenant filter when tenant_id given
+            if tenant_id is not None and draft.id is not None:
+                existing = session.get(EmailDraft, draft.id)
+                if existing is None or existing.tenant_id != tenant_id:
+                    raise HTTPException(status_code=404, detail="Draft not found")
             merged = session.merge(draft)
             session.commit()
             session.refresh(merged)
@@ -539,6 +564,104 @@ class DatabaseService:
             if row is None or row.tenant_id != tenant_id:
                 return None
             return row
+
+    async def create_knowledge_base(self, *, tenant_id: int, name: str) -> KnowledgeBase:
+        """Create a knowledge base namespace for a tenant."""
+        with Session(self.engine) as session:
+            kb = KnowledgeBase(tenant_id=tenant_id, name=name)
+            session.add(kb)
+            session.commit()
+            session.refresh(kb)
+            logger.info("knowledge_base_created", kb_id=kb.id, tenant_id=tenant_id)
+            return kb
+
+    async def get_knowledge_base(self, tenant_id: int, kb_id: int) -> Optional[KnowledgeBase]:
+        """Return KB if it belongs to tenant."""
+        with Session(self.engine) as session:
+            kb = session.get(KnowledgeBase, kb_id)
+            if kb is None or kb.tenant_id != tenant_id:
+                return None
+            return kb
+
+    async def list_knowledge_bases(self, tenant_id: int) -> list[KnowledgeBase]:
+        """List knowledge bases for a tenant."""
+        with Session(self.engine) as session:
+            statement = select(KnowledgeBase).where(KnowledgeBase.tenant_id == tenant_id)
+            return list(session.exec(statement).all())
+
+    async def create_knowledge_document(
+        self,
+        *,
+        tenant_id: int,
+        knowledge_base_id: int,
+        title: str,
+        content: str = "",
+        file_ref: str = "",
+    ):
+        """Insert a tenant-scoped knowledge document after verifying KB ownership."""
+        kb = await self.get_knowledge_base(tenant_id, knowledge_base_id)
+        if kb is None:
+            raise HTTPException(status_code=404, detail="Knowledge base not found")
+        with Session(self.engine) as session:
+            doc = KnowledgeDocument(
+                tenant_id=tenant_id,
+                knowledge_base_id=knowledge_base_id,
+                title=title,
+                content=content,
+                file_ref=file_ref,
+            )
+            session.add(doc)
+            session.commit()
+            session.refresh(doc)
+            logger.info(
+                "knowledge_document_created",
+                doc_id=doc.id,
+                tenant_id=tenant_id,
+                knowledge_base_id=knowledge_base_id,
+            )
+            return doc
+
+    async def get_knowledge_document(self, tenant_id: int, document_id: int):
+        with Session(self.engine) as session:
+            doc = session.get(KnowledgeDocument, document_id)
+            if doc is None or doc.tenant_id != tenant_id:
+                return None
+            return doc
+
+    async def list_knowledge_documents(self, tenant_id: int, knowledge_base_id: int):
+        kb = await self.get_knowledge_base(tenant_id, knowledge_base_id)
+        if kb is None:
+            return []
+        with Session(self.engine) as session:
+            statement = (
+                select(KnowledgeDocument)
+                .where(
+                    KnowledgeDocument.tenant_id == tenant_id,
+                    KnowledgeDocument.knowledge_base_id == knowledge_base_id,
+                )
+                .order_by(KnowledgeDocument.created_at)
+            )
+            return list(session.exec(statement).all())
+
+    async def search_knowledge_documents(self, tenant_id: int, query: str, *, knowledge_base_id: int | None = None):
+        """Substring search over title/content within the tenant namespace only."""
+        q = (query or "").strip()
+        if not q:
+            return []
+        with Session(self.engine) as session:
+            statement = select(KnowledgeDocument).where(KnowledgeDocument.tenant_id == tenant_id)
+            if knowledge_base_id is not None:
+                kb = await self.get_knowledge_base(tenant_id, knowledge_base_id)
+                if kb is None:
+                    return []
+                statement = statement.where(KnowledgeDocument.knowledge_base_id == knowledge_base_id)
+            rows = list(session.exec(statement).all())
+        needle = q.lower()
+        return [
+            d
+            for d in rows
+            if needle in (d.title or "").lower() or needle in (d.content or "").lower()
+        ]
 
 
 # Create a singleton instance

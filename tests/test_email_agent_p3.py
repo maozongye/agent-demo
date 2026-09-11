@@ -76,7 +76,7 @@ def _build_app(monkeypatch, *, role: str, drafts: dict, audits: list):
                 return None
             return d
 
-        async def save_email_draft(self, draft):
+        async def save_email_draft(self, draft, *, tenant_id=None):
             drafts[draft.id] = draft
             return draft
 

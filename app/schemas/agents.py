@@ -143,3 +143,29 @@ class SqlValidateRequest(BaseModel):
     """Validate SQL without executing."""
 
     sql: str = Field(..., min_length=1)
+
+
+class KnowledgeBaseCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+
+
+class KnowledgeBaseResponse(BaseModel):
+    id: int
+    tenant_id: int
+    name: str
+    created_at: datetime
+
+
+class KnowledgeDocumentCreate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=512)
+    content: str = Field(default="")
+
+
+class KnowledgeDocumentResponse(BaseModel):
+    id: int
+    tenant_id: int
+    knowledge_base_id: int
+    title: str
+    content: str
+    file_ref: str = ""
+    created_at: datetime
