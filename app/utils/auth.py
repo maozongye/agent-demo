@@ -44,6 +44,9 @@ def create_access_token(
     else:
         expire = datetime.now(UTC) + timedelta(days=settings.JWT_ACCESS_TOKEN_EXPIRE_DAYS)
 
+    if not settings.JWT_SECRET_KEY or not str(settings.JWT_SECRET_KEY).strip():
+        raise RuntimeError("JWT_SECRET_KEY is empty; refusing to create access token")
+
     to_encode: Dict[str, Any] = {
         "sub": thread_id,
         "exp": expire,

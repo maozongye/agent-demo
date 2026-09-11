@@ -1,7 +1,6 @@
 """Tenant and membership request/response schemas."""
 
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -34,7 +33,9 @@ class MembershipResponse(BaseModel):
 
 
 class MembershipJoin(BaseModel):
-    """Request to join a tenant (thin stub)."""
+    """Request body for the disabled open-join stub (Phase 1 invite/admin-only).
+
+    Role is not client-selectable on public join; open join always returns 403.
+    """
 
     tenant_id: int
-    role: str = Field(default="member", pattern=r"^(owner|admin|member)$")

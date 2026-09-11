@@ -35,7 +35,7 @@ Thin tenant endpoints:
 
 - `POST /api/v1/auth/tenants` — create + owner membership
 - `GET /api/v1/auth/tenants/memberships` — list
-- `POST /api/v1/auth/tenants/join` — join stub
+- `POST /api/v1/auth/tenants/join` — **disabled in Phase 1** (always **403**); join is **invite/admin-only**
 - `GET /api/v1/auth/tenants/current` — resolved tenant
 
 ## Session + Knowledge Base isolation
@@ -74,6 +74,7 @@ rejected → draft   (re-edit)
 - Transitions enforced in `app/services/email_draft.py`
 - **`send` only from `approved`**; otherwise **HTTP 403**
 - Never auto-send
+- **Role gate:** only tenant roles `owner` or `admin` may `approve`, `reject`, or `send`. Members may create drafts and `submit-for-approval` only (`require_tenant_role`).
 
 ## Models (SQLModel + BaseModel)
 
@@ -86,3 +87,4 @@ rejected → draft   (re-edit)
 
 - `tests/test_tenant_context.py` — `X-Tenant-Id` without membership → 403
 - `tests/test_email_approval.py` — cannot send from draft / pending_approval
+- `tests/test_phase1_review_fixes.py` — open join disabled; member approve/send → 403; cross-tenant draft denied

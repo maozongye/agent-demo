@@ -220,6 +220,38 @@ async def get_current_tenant(
     return tenant
 
 
+
+
+async def require_tenant_role(
+    user: User,
+    tenant: Tenant,
+    allowed_roles: set[str],
+) -> str:
+    """Ensure the user has one of the allowed roles in the tenant.
+
+    Args:
+        user: Authenticated user.
+        tenant: Active tenant.
+        allowed_roles: Roles permitted for the operation (e.g. {"owner", "admin"}).
+
+    Returns:
+        str: The user's membership role.
+
+    Raises:
+        HTTPException: 403 if membership missing or role insufficient.
+    """
+    membership = await db_service.get_membership(user.id, tenant.id)
+    if membership is None:
+        raise HTTPException(status_code=403, detail="Not a member of the requested tenant")
+    role = membership.role
+    if role not in allowed_roles:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Requires one of roles: {', '.join(sorted(allowed_roles))}",
+        )
+    return role
+
+
 @router.post("/register", response_model=UserResponse)
 @limiter.limit(settings.RATE_LIMIT_ENDPOINTS["register"][0])
 async def register_user(request: Request, user_data: UserCreate):
@@ -278,8 +310,8 @@ async def login(
         HTTPException: If credentials are invalid
     """
     try:
+        # Do NOT sanitize passwords with html.escape — it breaks & < > " in legitimate passwords.
         username = sanitize_string(username)
-        password = sanitize_string(password)
         grant_type = sanitize_string(grant_type)
 
         if grant_type != "password":
@@ -432,20 +464,14 @@ async def list_memberships(user: User = Depends(get_current_user)):
 
 @router.post("/tenants/join", response_model=MembershipResponse)
 async def join_tenant(payload: MembershipJoin, user: User = Depends(get_current_user)):
-    """Join a tenant (thin stub; production would invite/approve)."""
-    tenant = await db_service.get_tenant(payload.tenant_id)
-    if tenant is None:
-        raise HTTPException(status_code=404, detail="Tenant not found")
-    existing = await db_service.get_membership(user.id, payload.tenant_id)
-    if existing:
-        raise HTTPException(status_code=400, detail="Already a member")
-    membership = await db_service.create_membership(user.id, payload.tenant_id, role=payload.role)
-    return MembershipResponse(
-        id=membership.id,
-        user_id=membership.user_id,
-        tenant_id=membership.tenant_id,
-        role=membership.role,
-        created_at=membership.created_at,
+    """Open self-join is disabled in Phase 1 (invite/admin-add only).
+
+    Always returns 403. Kept as a stub so clients get a clear error instead of 404.
+    """
+    _ = (payload, user)
+    raise HTTPException(
+        status_code=403,
+        detail="Open tenant join is disabled; use invitation/admin add",
     )
 
 

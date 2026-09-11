@@ -239,5 +239,66 @@ class Settings:
                 setattr(self, key, value)
 
 
+
+
+# Known insecure defaults that must never be used outside tests
+_WEAK_JWT_SECRETS = {
+    "",
+    "your-jwt-secret-key",
+    "secret",
+    "changeme",
+    "change-me",
+    "jwt-secret",
+    "jwt_secret",
+    "test",
+    "dev",
+    "development",
+}
+
+_TEST_JWT_SECRET = "test-only-jwt-secret-do-not-use-elsewhere"
+
+
+def _is_weak_jwt_secret(secret: str | None) -> bool:
+    """Return True if the JWT secret is missing or a known weak default."""
+    if secret is None:
+        return True
+    normalized = str(secret).strip()
+    if not normalized:
+        return True
+    return normalized.lower() in {s.lower() for s in _WEAK_JWT_SECRETS if s}
+
+
+def validate_jwt_secret(secret: str, environment: Environment) -> str:
+    """Validate JWT secret for the current environment.
+
+    In TEST, empty/weak secrets are replaced with a fixed test secret (or a non-weak
+    JWT_SECRET_KEY from the environment). Outside TEST, empty/weak secrets raise
+    RuntimeError at startup.
+
+    Args:
+        secret: Configured JWT secret.
+        environment: Current application environment.
+
+    Returns:
+        str: A usable JWT secret.
+
+    Raises:
+        RuntimeError: If the secret is missing/weak outside the test environment.
+    """
+    if environment == Environment.TEST:
+        if _is_weak_jwt_secret(secret):
+            return _TEST_JWT_SECRET
+        return secret
+
+    if _is_weak_jwt_secret(secret):
+        raise RuntimeError(
+            "JWT_SECRET_KEY is missing or set to a known weak default. "
+            "Set a strong secret before starting the application "
+            f"(environment={environment.value})."
+        )
+    return secret
+
+
 # Create settings instance
 settings = Settings()
+settings.JWT_SECRET_KEY = validate_jwt_secret(settings.JWT_SECRET_KEY, settings.ENVIRONMENT)

@@ -221,7 +221,10 @@ class DatabaseService:
         """
         try:
             with Session(self.engine) as session:
-                session.delete(ChatSession, session_id)
+                chat_session = session.get(ChatSession, session_id)
+                if not chat_session:
+                    return False
+                session.delete(chat_session)
                 session.commit()
                 logger.info("session_deleted", session_id=session_id)
                 return True

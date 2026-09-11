@@ -2,9 +2,9 @@
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.api.v1.auth import get_current_tenant, get_current_user
+from app.api.v1.auth import get_current_tenant, get_current_user, require_tenant_role
 from app.models.email_draft import EmailStatus
-from app.models.tenant import Tenant
+from app.models.tenant import MembershipRole, Tenant
 from app.models.user import User
 from app.schemas.agents import (
     EmailClassifyResponse,
@@ -19,6 +19,8 @@ from app.services.email_draft import (
 
 router = APIRouter()
 db_service = DatabaseService()
+
+_APPROVER_ROLES = {MembershipRole.OWNER.value, MembershipRole.ADMIN.value}
 
 
 def _to_response(draft) -> EmailDraftResponse:
@@ -41,7 +43,7 @@ async def create_draft(
     user: User = Depends(get_current_user),
     tenant: Tenant = Depends(get_current_tenant),
 ) -> EmailDraftResponse:
-    """Create an email draft in ``draft`` status."""
+    """Create an email draft in ``draft`` status. Members may create drafts."""
     _ = user
     draft = await db_service.create_email_draft(
         tenant_id=tenant.id,
@@ -77,7 +79,7 @@ async def submit_for_approval(
     user: User = Depends(get_current_user),
     tenant: Tenant = Depends(get_current_tenant),
 ) -> EmailDraftResponse:
-    """Transition draft → pending_approval."""
+    """Transition draft → pending_approval. Members may submit for approval."""
     _ = user
     draft = await db_service.get_email_draft(draft_id, tenant.id)
     if draft is None:
@@ -93,8 +95,8 @@ async def approve_draft(
     user: User = Depends(get_current_user),
     tenant: Tenant = Depends(get_current_tenant),
 ) -> EmailDraftResponse:
-    """Transition pending_approval → approved."""
-    _ = user
+    """Transition pending_approval → approved. Owner/admin only."""
+    await require_tenant_role(user, tenant, _APPROVER_ROLES)
     draft = await db_service.get_email_draft(draft_id, tenant.id)
     if draft is None:
         raise HTTPException(status_code=404, detail="Draft not found")
@@ -109,8 +111,8 @@ async def reject_draft(
     user: User = Depends(get_current_user),
     tenant: Tenant = Depends(get_current_tenant),
 ) -> EmailDraftResponse:
-    """Transition pending_approval → rejected."""
-    _ = user
+    """Transition pending_approval → rejected. Owner/admin only."""
+    await require_tenant_role(user, tenant, _APPROVER_ROLES)
     draft = await db_service.get_email_draft(draft_id, tenant.id)
     if draft is None:
         raise HTTPException(status_code=404, detail="Draft not found")
@@ -125,8 +127,8 @@ async def send_draft(
     user: User = Depends(get_current_user),
     tenant: Tenant = Depends(get_current_tenant),
 ) -> EmailDraftResponse:
-    """Send an approved draft. Raises 403 if not approved (never auto-send)."""
-    _ = user
+    """Send an approved draft. Owner/admin only. Raises 403 if not approved."""
+    await require_tenant_role(user, tenant, _APPROVER_ROLES)
     draft = await db_service.get_email_draft(draft_id, tenant.id)
     if draft is None:
         raise HTTPException(status_code=404, detail="Draft not found")
